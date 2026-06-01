@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: habit-tracker-api
+    runtime: php
+    rootDir: habit-tracker-api
+    buildCommand: ./build.sh
+    startCommand: php artisan serve --host=0.0.0.0 --port=$PORT
+    healthCheckPath: /up
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false
+      - key: APP_KEY
+        generateValue: true
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_URL
+        fromDatabase:
+          name: habit-tracker-db
+          property: connectionString
+      - key: SESSION_DRIVER
+        value: cookie
+      - key: CACHE_STORE
+        value: array
+      - key: QUEUE_CONNECTION
+        value: sync
+      - key: CORS_ALLOWED_ORIGINS
+        value: "*"
+      - key: SANCTUM_STATEFUL_DOMAINS
+        value: ""
+
+databases:
+  - name: habit-tracker-db
+    databaseName: habit_tracker
+    user: habit_tracker

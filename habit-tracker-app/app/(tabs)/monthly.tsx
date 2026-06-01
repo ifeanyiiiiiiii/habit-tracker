@@ -31,6 +31,14 @@ export default function MonthlyScreen() {
   const [newAction, setNewAction] = useState<'build' | 'break'>('build');
   const [saving, setSaving] = useState(false);
 
+  // Edit modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editAction, setEditAction] = useState<'build' | 'break'>('build');
+  const [editSaving, setEditSaving] = useState(false);
+
   const fetchHabits = useCallback(async (background = false) => {
     if (!background) setLoading(true);
     try {
@@ -73,6 +81,52 @@ export default function MonthlyScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openEditModal = (habit: Habit) => {
+    setEditingHabit(habit);
+    setEditTitle(habit.title);
+    setEditCategory(habit.category || '');
+    setEditAction(habit.action);
+    setEditModalVisible(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editingHabit || !editTitle.trim()) { Alert.alert('Title required'); return; }
+    setEditSaving(true);
+    try {
+      await api.put(`/habits/${editingHabit.id}`, { title: editTitle.trim(), category: editCategory.trim() || undefined, action: editAction });
+      setEditModalVisible(false);
+      await fetchHabits();
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.message || 'Failed to update habit.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const confirmDelete = (habit: Habit) => {
+    Alert.alert('Delete Habit', `Delete "${habit.title}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await api.delete(`/habits/${habit.id}`);
+            await fetchHabits();
+          } catch {
+            Alert.alert('Error', 'Failed to delete habit.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const showOptions = (habit: Habit) => {
+    Alert.alert(habit.title, 'What would you like to do?', [
+      { text: '✏️  Edit', onPress: () => openEditModal(habit) },
+      { text: '🗑️  Delete', style: 'destructive', onPress: () => confirmDelete(habit) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   if (loading) return (
@@ -129,6 +183,7 @@ export default function MonthlyScreen() {
                 <Text className="text-secondary font-bold mb-3 mt-4 text-sm uppercase tracking-wider">🚫 Breaking</Text>
               )}
               <View className="mb-3 bg-surface rounded-2xl p-4">
+                <TouchableOpacity onLongPress={() => showOptions(item)} delayLongPress={400} activeOpacity={0.85}>
                 <View className="flex-row justify-between items-start mb-2">
                   <Text className="text-white font-semibold text-base flex-1 mr-2">{item.title}</Text>
                   <Text className={`text-xs font-bold px-2 py-1 rounded-xl ${item.action === 'build' ? 'bg-accent/20 text-accent' : 'bg-secondary/20 text-secondary'}`}>
@@ -145,6 +200,7 @@ export default function MonthlyScreen() {
                 {(item.streak ?? 0) > 1 && (
                   <Text className="text-primary text-xs mt-2">🔥 {item.streak} day streak</Text>
                 )}
+                </TouchableOpacity>
               </View>
             </>
           );
@@ -202,6 +258,51 @@ export default function MonthlyScreen() {
               {saving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Add Habit</Text>}
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setModalVisible(false)} style={{ marginTop: 12, alignItems: 'center' }}>
+              <Text style={{ color: '#A0A0B0', fontSize: 15 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Edit Habit Modal */}
+      <Modal visible={editModalVisible} transparent animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={() => setEditModalVisible(false)} />
+          <View style={{ backgroundColor: '#2A2A3E', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
+            <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 20 }}>Edit Monthly Habit</Text>
+            <TextInput
+              style={{ backgroundColor: '#1E1E2E', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 12, fontSize: 15 }}
+              placeholder="Habit title *"
+              placeholderTextColor="#A0A0B0"
+              value={editTitle}
+              onChangeText={setEditTitle}
+            />
+            <TextInput
+              style={{ backgroundColor: '#1E1E2E', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 15 }}
+              placeholder="Category (optional)"
+              placeholderTextColor="#A0A0B0"
+              value={editCategory}
+              onChangeText={setEditCategory}
+            />
+            <Text style={{ color: '#A0A0B0', fontSize: 13, marginBottom: 8 }}>Type</Text>
+            <View style={{ flexDirection: 'row', marginBottom: 20, gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => setEditAction('build')}
+                style={{ flex: 1, padding: 12, borderRadius: 12, alignItems: 'center', backgroundColor: editAction === 'build' ? '#43C59E' : '#1E1E2E' }}
+              >
+                <Text style={{ color: editAction === 'build' ? '#fff' : '#A0A0B0', fontWeight: 'bold' }}>🌱 Build</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setEditAction('break')}
+                style={{ flex: 1, padding: 12, borderRadius: 12, alignItems: 'center', backgroundColor: editAction === 'break' ? '#FF6584' : '#1E1E2E' }}
+              >
+                <Text style={{ color: editAction === 'break' ? '#fff' : '#A0A0B0', fontWeight: 'bold' }}>🚫 Break</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity onPress={saveEdit} disabled={editSaving} style={{ backgroundColor: '#6C63FF', borderRadius: 14, padding: 16, alignItems: 'center' }}>
+              {editSaving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Save Changes</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setEditModalVisible(false)} style={{ marginTop: 12, alignItems: 'center' }}>
               <Text style={{ color: '#A0A0B0', fontSize: 15 }}>Cancel</Text>
             </TouchableOpacity>
           </View>

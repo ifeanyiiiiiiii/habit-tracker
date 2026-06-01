@@ -6,7 +6,9 @@ import api from '@/services/api';
 import { Habit } from '@/types';
 
 const CACHE_KEY = 'cache_daily_habits';
+const REVIEW_KEY = 'habit_reviewed_date';
 const today = new Date().toISOString().split('T')[0];
+const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
 export default function DailyScreen() {
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -20,6 +22,18 @@ export default function DailyScreen() {
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Edit modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Day review modal state
+  const [reviewVisible, setReviewVisible] = useState(false);
+  const [reviewChecked, setReviewChecked] = useState<Set<number>>(new Set());
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const fetchHabits = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -48,6 +62,20 @@ export default function DailyScreen() {
       } else {
         fetchHabits(false);
       }
+    });
+    // Check if user needs to review yesterday's habits
+    AsyncStorage.getItem(REVIEW_KEY).then(async (reviewed) => {
+      if (reviewed === today) return;
+      const cached = await AsyncStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const cachedHabits: Habit[] = JSON.parse(cached);
+        if (cachedHabits.length > 0) {
+          setReviewChecked(new Set());
+          setReviewVisible(true);
+          return;
+        }
+      }
+      await AsyncStorage.setItem(REVIEW_KEY, today);
     });
   }, []);
 
@@ -83,6 +111,70 @@ export default function DailyScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openEditModal = (habit: Habit) => {
+    setEditingHabit(habit);
+    setEditTitle(habit.title);
+    setEditCategory(habit.category || '');
+    setEditModalVisible(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editingHabit || !editTitle.trim()) { Alert.alert('Title required'); return; }
+    setEditSaving(true);
+    try {
+      await api.put(`/habits/${editingHabit.id}`, { title: editTitle.trim(), category: editCategory.trim() || undefined });
+      setEditModalVisible(false);
+      await fetchHabits();
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.message || 'Failed to update habit.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const confirmDelete = (habit: Habit) => {
+    Alert.alert('Delete Habit', `Delete "${habit.title}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await api.delete(`/habits/${habit.id}`);
+            await fetchHabits();
+          } catch {
+            Alert.alert('Error', 'Failed to delete habit.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const showOptions = (habit: Habit) => {
+    Alert.alert(habit.title, 'What would you like to do?', [
+      { text: '✏️  Edit', onPress: () => openEditModal(habit) },
+      { text: '🗑️  Delete', style: 'destructive', onPress: () => confirmDelete(habit) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const submitReview = async () => {
+    setReviewSubmitting(true);
+    try {
+      const checks = Array.from(reviewChecked).map((id) =>
+        api.post(`/habits/${id}/toggle`, { log_date: yesterday }).catch(() => {}),
+      );
+      await Promise.all(checks);
+    } catch {}
+    await AsyncStorage.setItem(REVIEW_KEY, today);
+    setReviewSubmitting(false);
+    setReviewVisible(false);
+    await fetchHabits();
+  };
+
+  const skipReview = async () => {
+    await AsyncStorage.setItem(REVIEW_KEY, today);
+    setReviewVisible(false);
   };
 
   if (loading) return (
@@ -126,6 +218,8 @@ export default function DailyScreen() {
           return (
             <TouchableOpacity
               onPress={() => toggle(item, isCompleted)}
+              onLongPress={() => showOptions(item)}
+              delayLongPress={400}
               disabled={isToggling}
               className={`mb-3 rounded-2xl p-4 flex-row items-center ${isCompleted ? 'bg-accent/20 border border-accent/40' : 'bg-surface'}`}
             >
@@ -187,6 +281,94 @@ export default function DailyScreen() {
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Edit Habit Modal ─────────────────────────────────── */}
+      <Modal visible={editModalVisible} transparent animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={() => setEditModalVisible(false)} />
+          <View style={{ backgroundColor: '#2A2A3E', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
+            <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 20 }}>Edit Habit</Text>
+            <TextInput
+              style={{ backgroundColor: '#1E1E2E', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 12, fontSize: 15 }}
+              placeholder="Habit title *"
+              placeholderTextColor="#A0A0B0"
+              value={editTitle}
+              onChangeText={setEditTitle}
+            />
+            <TextInput
+              style={{ backgroundColor: '#1E1E2E', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 20, fontSize: 15 }}
+              placeholder="Category (optional)"
+              placeholderTextColor="#A0A0B0"
+              value={editCategory}
+              onChangeText={setEditCategory}
+            />
+            <TouchableOpacity onPress={saveEdit} disabled={editSaving} style={{ backgroundColor: '#6C63FF', borderRadius: 14, padding: 16, alignItems: 'center' }}>
+              {editSaving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Save Changes</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setEditModalVisible(false)} style={{ marginTop: 12, alignItems: 'center' }}>
+              <Text style={{ color: '#A0A0B0', fontSize: 15 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Day Review Modal ─────────────────────────────────── */}
+      <Modal visible={reviewVisible} transparent animationType="slide" onRequestClose={skipReview}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#2A2A3E', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: '82%' }}>
+            <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 4 }}>Yesterday's Review 📋</Text>
+            <Text style={{ color: '#A0A0B0', fontSize: 13, marginBottom: 4 }}>
+              {new Date(yesterday + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </Text>
+            <Text style={{ color: '#A0A0B0', fontSize: 13, marginBottom: 18 }}>
+              Check the habits you completed yesterday before starting today.
+            </Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
+              {habits.map((habit) => {
+                const checked = reviewChecked.has(habit.id);
+                return (
+                  <TouchableOpacity
+                    key={habit.id}
+                    onPress={() => setReviewChecked((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(habit.id)) next.delete(habit.id);
+                      else next.add(habit.id);
+                      return next;
+                    })}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#1E1E2E' }}
+                  >
+                    <View style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 2, borderColor: checked ? '#6C63FF' : '#555570', backgroundColor: checked ? '#6C63FF' : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+                      {checked && <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>✓</Text>}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: '#fff', fontSize: 15, fontWeight: '500' }}>{habit.title}</Text>
+                      {habit.category ? <Text style={{ color: '#A0A0B0', fontSize: 12, marginTop: 2 }}>{habit.category}</Text> : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+              <TouchableOpacity
+                onPress={skipReview}
+                style={{ flex: 1, backgroundColor: '#1E1E2E', borderRadius: 16, paddingVertical: 15, alignItems: 'center' }}
+              >
+                <Text style={{ color: '#A0A0B0', fontSize: 15, fontWeight: '600' }}>Skip</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={submitReview}
+                disabled={reviewSubmitting}
+                style={{ flex: 2, backgroundColor: '#6C63FF', borderRadius: 16, paddingVertical: 15, alignItems: 'center' }}
+              >
+                {reviewSubmitting
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>Submit ✓</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );

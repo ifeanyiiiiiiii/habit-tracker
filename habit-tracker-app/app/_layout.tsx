@@ -15,7 +15,7 @@ export default function RootLayout() {
       if (user) {
         router.replace('/(tabs)/daily');
       } else {
-        router.replace('/(auth)/login');
+        router.replace('/(auth)/welcome');
       }
     }
   }, [user, isLoading]);

@@ -34,6 +34,14 @@ export default function GoalsScreen() {
   const [milestones, setMilestones] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
+  // Edit modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editTargetDate, setEditTargetDate] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
   const fetchGoals = useCallback(async (background = false) => {
     if (!background) setLoading(true);
     try {
@@ -95,6 +103,70 @@ export default function GoalsScreen() {
     }
   };
 
+  const openEditModal = (goal: Goal) => {
+    setEditingGoal(goal);
+    setEditTitle(goal.title);
+    setEditDescription(goal.description || '');
+    setEditTargetDate(goal.target_date);
+    setEditModalVisible(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editingGoal || !editTitle.trim()) { Alert.alert('Title required'); return; }
+    if (!editTargetDate.trim()) { Alert.alert('Target date required (YYYY-MM-DD)'); return; }
+    setEditSaving(true);
+    try {
+      await api.put(`/goals/${editingGoal.id}`, {
+        title: editTitle.trim(),
+        description: editDescription.trim() || undefined,
+        target_date: editTargetDate.trim(),
+        milestones: editingGoal.milestones,
+      });
+      setEditModalVisible(false);
+      await fetchGoals();
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.message || 'Failed to update goal.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const confirmDelete = (goal: Goal) => {
+    Alert.alert('Delete Goal', `Delete "${goal.title}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await api.delete(`/goals/${goal.id}`);
+            await fetchGoals();
+          } catch {
+            Alert.alert('Error', 'Failed to delete goal.');
+          }
+        },
+      },
+    ]);
+  };
+
+  const showOptions = (goal: Goal) => {
+    Alert.alert(goal.title, 'What would you like to do?', [
+      { text: '✏️  Edit', onPress: () => openEditModal(goal) },
+      { text: '🗑️  Delete', style: 'destructive', onPress: () => confirmDelete(goal) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const toggleMilestone = async (goal: Goal, index: number) => {
+    const updated = (goal.milestones ?? []).map((m, i) =>
+      i === index ? { ...m, done: !m.done } : m,
+    );
+    try {
+      await api.put(`/goals/${goal.id}`, { ...goal, milestones: updated });
+      await fetchGoals();
+    } catch {
+      Alert.alert('Error', 'Failed to update milestone.');
+    }
+  };
+
   if (loading) return (
     <View className="flex-1 bg-dark items-center justify-center">
       <ActivityIndicator color="#6C63FF" size="large" />
@@ -144,6 +216,7 @@ export default function GoalsScreen() {
           const pct = mList.length > 0 ? Math.round((doneMilestones / mList.length) * 100) : 0;
 
           return (
+            <TouchableOpacity onLongPress={() => showOptions(item)} delayLongPress={400} activeOpacity={0.85}>
             <View className="mb-4 bg-surface rounded-2xl p-4">
               <View className="flex-row justify-between items-start mb-1">
                 <Text className="text-white font-semibold text-base flex-1 mr-2">{item.title}</Text>
@@ -164,10 +237,10 @@ export default function GoalsScreen() {
                     <Text className="text-muted text-xs">{doneMilestones}/{mList.length}</Text>
                   </View>
                   {mList.map((m, i) => (
-                    <View key={i} className="flex-row items-center mt-1">
+                    <TouchableOpacity key={i} onPress={() => toggleMilestone(item, i)} className="flex-row items-center mt-1">
                       <Text className={`text-xs mr-2 ${m.done ? 'text-accent' : 'text-muted'}`}>{m.done ? '✓' : '○'}</Text>
                       <Text className={`text-sm ${m.done ? 'text-muted line-through' : 'text-white'}`}>{m.title}</Text>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </>
               )}
@@ -178,6 +251,7 @@ export default function GoalsScreen() {
                 </Text>
               </View>
             </View>
+            </TouchableOpacity>
           );
         }}
       />
@@ -256,6 +330,44 @@ export default function GoalsScreen() {
                 <Text style={{ color: '#A0A0B0', fontSize: 15 }}>Cancel</Text>
               </TouchableOpacity>
             </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Edit Goal Modal */}
+      <Modal visible={editModalVisible} transparent animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+          <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} activeOpacity={1} onPress={() => setEditModalVisible(false)} />
+          <View style={{ backgroundColor: '#2A2A3E', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 }}>
+            <Text style={{ color: '#fff', fontSize: 20, fontWeight: 'bold', marginBottom: 20 }}>Edit Goal</Text>
+            <TextInput
+              style={{ backgroundColor: '#1E1E2E', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 12, fontSize: 15 }}
+              placeholder="Goal title *"
+              placeholderTextColor="#A0A0B0"
+              value={editTitle}
+              onChangeText={setEditTitle}
+            />
+            <TextInput
+              style={{ backgroundColor: '#1E1E2E', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 12, fontSize: 15 }}
+              placeholder="Description (optional)"
+              placeholderTextColor="#A0A0B0"
+              value={editDescription}
+              onChangeText={setEditDescription}
+              multiline
+            />
+            <TextInput
+              style={{ backgroundColor: '#1E1E2E', color: '#fff', borderRadius: 12, padding: 14, marginBottom: 20, fontSize: 15 }}
+              placeholder="Target date * (YYYY-MM-DD)"
+              placeholderTextColor="#A0A0B0"
+              value={editTargetDate}
+              onChangeText={setEditTargetDate}
+            />
+            <TouchableOpacity onPress={saveEdit} disabled={editSaving} style={{ backgroundColor: '#6C63FF', borderRadius: 14, padding: 16, alignItems: 'center' }}>
+              {editSaving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Save Changes</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setEditModalVisible(false)} style={{ marginTop: 12, alignItems: 'center' }}>
+              <Text style={{ color: '#A0A0B0', fontSize: 15 }}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
